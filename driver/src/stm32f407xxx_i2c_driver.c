@@ -346,6 +346,10 @@ uint8_t I2C_GetFlagStatus(I2C_RegDef_t* pI2Cx, uint32_t FlagName)
  */
 void I2C_Master_SendData(I2C_Handle_t* pI2CHandle, uint8_t* pTxBuffer, uint32_t len, uint32_t slaveAddr)
 {
+	// Enable the I2C peripheral if not setting bit PE = 1
+	if (!(pI2CHandle->pI2Cx->CR1 & (1 << 0)))
+		I2C_PeripheralControl(pI2CHandle->pI2Cx, ENABLE);
+	
 	// 1. Generate the START condition
 	I2C_GenerateStartCondition(pI2CHandle->pI2Cx);
 	
@@ -398,8 +402,9 @@ void I2C_Master_SendData(I2C_Handle_t* pI2CHandle, uint8_t* pTxBuffer, uint32_t 
  */
 void I2C_Master_ReceiveData(I2C_Handle_t* pI2CHandle, uint8_t* pRxBuffer, uint32_t len, uint32_t slaveAddr)
 {
-	// Enable the I2C peripheral 
-	I2C_PeripheralControl(pI2CHandle->pI2Cx, ENABLE);
+	// Enable the I2C peripheral if not setting bit PE = 1
+	if (!(pI2CHandle->pI2Cx->CR1 & (1 << 0)))
+		I2C_PeripheralControl(pI2CHandle->pI2Cx, ENABLE);
 	
 	// 1. Generate the START condition
 	I2C_GenerateStartCondition(pI2CHandle->pI2Cx);
@@ -447,7 +452,7 @@ void I2C_Master_ReceiveData(I2C_Handle_t* pI2CHandle, uint8_t* pRxBuffer, uint32
 		// Generate STOP condition to close the communication
 		I2C_GenerateStopCondition(pI2CHandle->pI2Cx); 
 		
-		// Read data 1 and 2 from Data Register
+		// Read sequentially data 1 and 2 from Data Register
 		*pRxBuffer = pI2CHandle->pI2Cx->DR;
 		pRxBuffer++;
 		*pRxBuffer = pI2CHandle->pI2Cx->DR;
@@ -457,8 +462,8 @@ void I2C_Master_ReceiveData(I2C_Handle_t* pI2CHandle, uint8_t* pRxBuffer, uint32
 	}
 	else if (len > 2)
 	{	
-		// Enable ACK bit after enabling I2C peripheral
-		I2C_ManageAck(pI2CHandle->pI2Cx, I2C_ACK_ENABLE);
+		// Enable ACK bit
+		pI2CHandle->pI2Cx->CR1 |= (1 << 10);
 		
 		// Clear the ADDR flag according to its software sequence
 		I2C_ClearAddrFlag(pI2CHandle->pI2Cx);
@@ -492,4 +497,130 @@ void I2C_Master_ReceiveData(I2C_Handle_t* pI2CHandle, uint8_t* pRxBuffer, uint32
 		I2C_PeripheralControl(pI2CHandle->pI2Cx, ENABLE);
         pI2CHandle->pI2Cx->CR1 |= (1 << 10);
     }
+}
+
+/****************************************************************
+ * @fn			- I2C_Master_WriteData_Mem
+ *
+ * @brief		- Write data to IC EEPROM
+ *
+ *
+ * @return		- none
+ *
+ * @note		- none
+ */
+void I2C_Master_WriteData_Mem(I2C_Handle_t* pI2CHandle, uint16_t address, uint8_t* pTxBuffer, uint32_t len, uint32_t slaveAddr)
+{
+	uint8_t byteSend;
+	// Enable the I2C peripheral if not setting bit PE = 1
+	if (!(pI2CHandle->pI2Cx->CR1 & (1 << 0)))
+		I2C_PeripheralControl(pI2CHandle->pI2Cx, ENABLE);
+	
+	// 1. Generate the START condition
+	I2C_GenerateStartCondition(pI2CHandle->pI2Cx);
+	
+	// 2. Confirm that start generation is completed bt checking the SB flag in the SR1
+	// 	 	NOTE: Until SB is cleared, SCL will be stretched (pulled to LOW)
+	while (I2C_GetFlagStatus(pI2CHandle->pI2Cx, I2C_FLAG_SB) == FLAG_RESET);
+	
+	// 3. Send the address of slave with r/w bit = 0 (Write) 
+	I2C_ExecuteAddressPhaseWrite(pI2CHandle, slaveAddr);
+	
+	// 4. Confirm that address phase is completed by checking ADDR flag in SR1
+	while (I2C_GetFlagStatus(pI2CHandle->pI2Cx, I2C_FLAG_ADDR) == FLAG_RESET);
+	
+	// 5. Clear the ADDR flag according to its software sequence
+	// 	  NOTE: Until ADDR is cleared SCL will be stretched (pulled to LOW)
+	I2C_ClearAddrFlag(pI2CHandle->pI2Cx);
+	
+	// 6. Send the selected address to do writing data
+	byteSend = (uint8_t)(address >> 8);					// Upper nibble
+	while (I2C_GetFlagStatus(pI2CHandle->pI2Cx, I2C_FLAG_TXE) == FLAG_RESET); 
+	pI2CHandle->pI2Cx->DR = byteSend;
+	byteSend = (uint8_t)(address);						// Lower nibble
+	while (I2C_GetFlagStatus(pI2CHandle->pI2Cx, I2C_FLAG_TXE) == FLAG_RESET); 
+	pI2CHandle->pI2Cx->DR = byteSend;
+	
+	// 7. Write data to EEPROM
+	uint8_t i = 0;
+	while (i < len)
+	{
+		// Wait until TXE = 1 -> DR is empty and ready to receive data
+		while (I2C_GetFlagStatus(pI2CHandle->pI2Cx, I2C_FLAG_TXE) == FLAG_RESET); 
+		pI2CHandle->pI2Cx->DR = *pTxBuffer;
+		pTxBuffer++;
+		
+		// roll-over occurs -> Stop Write operation
+		if ((address + i + 1) % IC24C64_BYTES_PER_PAGE == 0)
+			 break;
+		
+		i++;
+	}
+	
+	// 7. When len becomes zero, waiting for TXE = 1 and BTF = 1 before generating the STOP condition
+	//    NOTE:
+	//	  1. TXE = 1, BTF = 1 means that both DR và Shift Register is empty and next tranmission should begin
+	//	  2. When BTF = 1, SCL will be stretched (pulled to LOW)
+	//	  3. Bit BTF is only set by hardware when DR và Shift Register is empty
+	while (I2C_GetFlagStatus(pI2CHandle->pI2Cx, I2C_FLAG_TXE) == FLAG_RESET);
+	while (I2C_GetFlagStatus(pI2CHandle->pI2Cx, I2C_FLAG_BTF) == FLAG_RESET); 
+	
+	// 8. Generate STOP condition and master not to wait for the completion of stop condition.
+	//    NOTE: Generating STOP, bit BTF is automatically clear by hardware
+	I2C_GenerateStopCondition(pI2CHandle->pI2Cx);
+}
+
+/****************************************************************
+ * @fn			- I2C_Master_ReadData_Mem
+ *
+ * @brief		- Read data from IC EEPROM
+ *
+ *
+ * @return		- none
+ *
+ * @note		- none
+ */
+void I2C_Master_ReadData_Mem(I2C_Handle_t* pI2CHandle, uint16_t address, uint8_t* pRxBuffer, uint32_t len, uint32_t slaveAddr)
+{
+	uint8_t byteSend;
+	
+	// Enable the I2C peripheral if not setting bit PE = 1
+	if (!(pI2CHandle->pI2Cx->CR1 & (1 << 0)))
+		I2C_PeripheralControl(pI2CHandle->pI2Cx, ENABLE);
+	
+	// 1. Generate the START condition
+	I2C_GenerateStartCondition(pI2CHandle->pI2Cx);
+	
+	// 2. Confirm that start generation is completed bt checking the SB flag in the SR1
+	// 	 	NOTE: Until SB is cleared, SCL will be stretched (pulled to LOW)
+	while (I2C_GetFlagStatus(pI2CHandle->pI2Cx, I2C_FLAG_SB) == FLAG_RESET);
+	
+	// 3. Send the address of slave with r/w bit = 0 (Write)
+	I2C_ExecuteAddressPhaseWrite(pI2CHandle, slaveAddr);
+	
+	// 4. Confirm that address phase is completed by checking ADDR flag in SR1
+	while (I2C_GetFlagStatus(pI2CHandle->pI2Cx, I2C_FLAG_ADDR) == FLAG_RESET);
+	
+	// 5. Clear the ADDR flag according to its software sequence
+	// 	  NOTE: Until ADDR is cleared SCL will be stretched (pulled to LOW)
+	I2C_ClearAddrFlag(pI2CHandle->pI2Cx);
+	
+	// 6. Send the selected address to do reading data
+	byteSend = (uint8_t)(address >> 8);			// Upper byte (MSB)
+	while (I2C_GetFlagStatus(pI2CHandle->pI2Cx, I2C_FLAG_TXE) == FLAG_RESET); 
+	pI2CHandle->pI2Cx->DR = byteSend;
+	byteSend = (uint8_t)(address);				// Lower byte (LSB)
+	while (I2C_GetFlagStatus(pI2CHandle->pI2Cx, I2C_FLAG_TXE) == FLAG_RESET); 
+	pI2CHandle->pI2Cx->DR = byteSend;
+	
+	// 7. When len becomes zero, waiting for TXE = 1 and BTF = 1 before generating the STOP condition
+	//    NOTE:
+	//	  1. TXE = 1, BTF = 1 means that both DR và Shift Register is empty and next tranmission should begin
+	//	  2. When BTF = 1, SCL will be stretched (pulled to LOW)
+	//	  3. Bit BTF is only set by hardware when DR và Shift Register is empty
+	while (I2C_GetFlagStatus(pI2CHandle->pI2Cx, I2C_FLAG_TXE) == FLAG_RESET);
+	while (I2C_GetFlagStatus(pI2CHandle->pI2Cx, I2C_FLAG_BTF) == FLAG_RESET); 
+	
+	// 8. Read the data from EEPROM
+	I2C_Master_ReceiveData(pI2CHandle, pRxBuffer, len, slaveAddr);
 }

@@ -63,6 +63,9 @@ extern int errno;
 extern int __io_putchar(int ch) __attribute__((weak));
 extern int __io_getchar(void) __attribute__((weak));
 
+// Create an alias for the CPU core register sp. In this case, the variable stack_ptr 
+// will hold the same value as the CPU’s sp register, meaning stack_ptr points to the 
+// address currently referenced by the stack pointer
 register char * stack_ptr asm ("sp");
 
 char *__env[1] = { 0 };

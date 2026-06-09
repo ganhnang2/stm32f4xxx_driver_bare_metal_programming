@@ -13,7 +13,7 @@ int main()
 	// 1. Cấu hình gpioLED, gpioButton
 	GPIO_Handle_t gpioLED, gpioButton;
 	gpioLED.pGPIOx = GPIOD;
-	gpioLED.GPIO_PinConfig.GPIO_PinNumber = 12;
+	gpioLED.GPIO_PinConfig.GPIO_PinNumber = 11;
 	gpioLED.GPIO_PinConfig.GPIO_PinMode = GPIO_MODE_OUT;
 	gpioLED.GPIO_PinConfig.GPIO_PinSpeed = GPIO_SPEED_FAST;
 	gpioLED.GPIO_PinConfig.GPIO_PinPuPdControl = GPIO_NO_PUPD;

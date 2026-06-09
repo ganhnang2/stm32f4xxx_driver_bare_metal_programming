@@ -80,6 +80,11 @@ typedef struct
 #define I2C_FLAG_TIMEOUT			(1 << 14)
 #define I2C_FLAG_SMBALERT			(1 << 15)
 
+/*
+ * The number of bytes per page in EEPROM 24C64
+ */
+#define IC24C64_BYTES_PER_PAGE  	32
+
 /***************************************************************************************
  *						APIs support by this driver
  *		For more information about the APIs check the function definitions
@@ -99,6 +104,18 @@ void I2C_ManageAck(I2C_RegDef_t* pI2Cx, uint8_t EnorDi);
  */
 void I2C_Master_SendData(I2C_Handle_t* pI2CHandle, uint8_t* pTxBuffer, uint32_t len, uint32_t slaveAddr);
 void I2C_Master_ReceiveData(I2C_Handle_t* pI2CHandle, uint8_t* pRxBuffer, uint32_t len, uint32_t slaveAddr);
+
+/*
+ * Access memory IC EEPROM to read and write data 
+ */
+void I2C_Master_WriteData_Mem(I2C_Handle_t* pI2CHandle, uint16_t address, uint8_t* pTxBuffer, uint32_t len, uint32_t slaveAddr);
+void I2C_Master_ReadData_Mem(I2C_Handle_t* pI2CHandle, uint16_t address, uint8_t* pRxBuffer, uint32_t len, uint32_t slaveAddr);
+
+/*
+ * 
+ */
+void I2C_Master_SendData_IT();
+void I2C_Master_ReceiveData_IT();
 
 /*
  * IRQ Configurattion and ISR handling
